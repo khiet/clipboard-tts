@@ -1,3 +1,22 @@
+"""Speak the macOS clipboard out loud using the Kokoro TTS model.
+
+Usage:
+    python speak_clipboard.py [-s SPEED] [--speed SPEED]
+
+Options:
+    -s, --speed SPEED   Playback speed multiplier (must be > 0). Default: 1.0
+                        Examples: 1.2 = 1.2x faster, 0.8 = 0.8x slower.
+
+Examples:
+    python speak_clipboard.py                # speak clipboard at normal speed
+    python speak_clipboard.py --speed 1.2    # 1.2x speed
+    python speak_clipboard.py -s 0.8         # 0.8x speed
+
+Exit codes:
+    0  success
+    1  clipboard empty, invalid speed, or no audio generated
+"""
+
 import argparse
 import subprocess
 import sys
