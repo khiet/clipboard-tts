@@ -1,7 +1,7 @@
 """Speak the macOS clipboard out loud using the Kokoro TTS model.
 
 Usage:
-    python speak_clipboard.py [-s SPEED] [-v VOICE]
+    python speak_clipboard.py [-s SPEED] [-v VOICE] [-d]
 
 Options:
     -s, --speed SPEED   Playback speed multiplier (must be > 0). Default: 1.0
@@ -15,21 +15,24 @@ Options:
                         Examples: af_heart, af_bella, am_adam, bf_isabella,
                                   bm_george, jf_alpha
                         Full list: https://huggingface.co/hexgrad/Kokoro-82M/tree/main/voices
-                        Note: the first time you use a new voice you must run
-                        with HF_HUB_OFFLINE=0 so it can be downloaded.
+    -d, --download      Allow Hugging Face downloads for this run by unsetting
+                        HF_HUB_OFFLINE. Use this the first time you try a new
+                        voice. Cached voices then work offline.
 
 Examples:
     python speak_clipboard.py                        # default voice, 1.0x
     python speak_clipboard.py --speed 1.2            # 1.2x speed
     python speak_clipboard.py -v af_bella            # American female 'Bella'
     python speak_clipboard.py -v bm_george -s 1.1    # British male, 1.1x
+    python speak_clipboard.py -v af_bella -d         # download new voice
 
 Exit codes:
     0  success
-    1  clipboard empty, invalid args, or no audio generated
+    1  clipboard empty, invalid args, missing voice (offline), or no audio
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import warnings
@@ -38,6 +41,8 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning, module=r"torch\.nn\.modules\.rnn")
     warnings.filterwarnings("ignore", category=FutureWarning, module=r"torch\.nn\.utils\.weight_norm")
     from kokoro import KPipeline
+
+from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
 
 DEFAULT_VOICE = "bf_emma"
@@ -128,6 +133,12 @@ def main():
         default=DEFAULT_VOICE,
         help=f"Kokoro voice ID (e.g., af_bella, bm_george). Default: {DEFAULT_VOICE}",
     )
+    parser.add_argument(
+        "-d",
+        "--download",
+        action="store_true",
+        help="Allow HF downloads this run (unsets HF_HUB_OFFLINE). Needed for new voices.",
+    )
     args = parser.parse_args()
 
     if args.speed <= 0:
@@ -140,13 +151,26 @@ def main():
         print(str(exc), file=sys.stderr)
         sys.exit(1)
 
+    if args.download:
+        os.environ.pop("HF_HUB_OFFLINE", None)
+
     text = get_clipboard_text()
 
     if not text:
         print("Clipboard is empty", file=sys.stderr)
         sys.exit(1)
 
-    stream_audio(text, speed=args.speed, voice=args.voice)
+    try:
+        stream_audio(text, speed=args.speed, voice=args.voice)
+    except (LocalEntryNotFoundError, OfflineModeIsEnabled) as exc:
+        print(
+            f"\nError: voice '{args.voice}' is not cached and HF is offline.\n"
+            f"Re-run with -d/--download to fetch it, e.g.:\n"
+            f"    ./speak_clipboard.sh -d -v {args.voice}\n"
+            f"\nUnderlying error: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
