@@ -1,6 +1,6 @@
 # Clipboard TTS
 
-Speak the macOS clipboard out loud using the [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Streams audio directly to `ffplay` so playback starts as soon as the first chunk is synthesized. No temp file, no waiting for the whole text to render.
+Speak the macOS clipboard out loud using the [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Renders the text to audio, then plays it through `mpv` driven over its JSON IPC socket — giving you interactive pause, seek, and live speed controls when run in a terminal.
 
 Runs fully offline after the model is cached on first run.
 
@@ -9,11 +9,11 @@ Runs fully offline after the model is cached on first run.
 System packages (Homebrew):
 
 ```sh
-brew install espeak-ng ffmpeg
+brew install espeak-ng mpv
 ```
 
 - `espeak-ng`: phonemizer backend Kokoro uses for English text.
-- `ffmpeg`: provides `ffplay`, used to stream raw PCM audio to the speakers.
+- `mpv`: media player used for playback and transport controls; driven over its JSON IPC socket.
 
 Python toolchain via [mise](https://mise.jdx.dev/) (auto-creates a `.venv`):
 
@@ -53,9 +53,22 @@ python speak_clipboard.py -d -v jf_alpha       # download & try a new voice
 
 Flags:
 
-- `-s, --speed FLOAT`: playback speed multiplier (must be > 0). Default `1.0`.
+- `-s, --speed FLOAT`: initial playback speed multiplier (must be > 0). Default `1.0`. Adjustable live with the up/down arrows.
 - `-v, --voice ID`: Kokoro voice ID. Default `bf_emma`. See [Voices](#voices).
 - `-d, --download`: allow Hugging Face downloads for this run by unsetting `HF_HUB_OFFLINE`. Use this the first time you try a new voice; cached voices then work offline.
+
+### Playback controls
+
+While playing **in a terminal**, these keys are live:
+
+| Key       | Action                                  |
+| --------- | --------------------------------------- |
+| `space`   | pause / resume                          |
+| `←` / `→` | seek backward / forward 5s              |
+| `↑` / `↓` | playback speed −/+ 0.1x (pitch-corrected) |
+| `q`       | quit                                    |
+
+Controls require a focused terminal. When launched without a TTY (e.g. from a global shortcut), the script just plays the audio through with no interactive controls.
 
 Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. The companion `~/speak_clipboard.sh` wrapper forwards all flags through to the Python script.
 
@@ -87,9 +100,10 @@ Most knobs are CLI flags now (see [Usage](#usage)). To change defaults or chunki
 ## How it works
 
 1. `pbpaste` reads the clipboard.
-2. `KPipeline` synthesizes audio in chunks (split on newlines).
-3. Each chunk is converted to raw float32 PCM (`24kHz`, mono) and piped to `ffplay` via stdin.
-4. `ffplay` plays the stream live and exits when stdin closes (`-autoexit`).
+2. `KPipeline` synthesizes the full text to a float32 PCM buffer (`24kHz`, mono) at 1.0x.
+3. The buffer is written to a temp WAV and played by `mpv`, launched with `--input-ipc-server` so the script can send commands over a Unix socket.
+4. Keypresses in the terminal are translated to mpv IPC commands (`set pause`, `seek`, `set_property speed`). Playback speed is applied by mpv with pitch correction, so it can change live without re-rendering.
+5. The temp WAV and socket are cleaned up when playback ends or you quit.
 
 ## Refreshing the model
 
