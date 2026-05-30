@@ -124,8 +124,13 @@ def synthesize(text, voice):
 
 
 def _ipc_send(sock, *command):
-    """Send one mpv IPC command. Responses are ignored."""
-    sock.sendall(json.dumps({"command": list(command)}).encode() + b"\n")
+    """Send one mpv IPC command, best-effort. Responses are ignored.
+
+    If mpv has already exited (e.g. playback finished, or a `quit` raced with
+    EOF) the socket is gone; the command is simply a no-op.
+    """
+    with contextlib.suppress(OSError):
+        sock.sendall(json.dumps({"command": list(command)}).encode() + b"\n")
 
 
 def _connect_ipc(sock_path, proc, timeout=5.0):
