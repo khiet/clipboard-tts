@@ -2,7 +2,7 @@
 
 Speak the macOS clipboard out loud using the [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Renders the text to audio, then plays it through `mpv` driven over its JSON IPC socket — giving you interactive pause, seek, and live speed controls when run in a terminal.
 
-Runs fully offline after the model is cached on first run.
+Clips are saved under `audios/` so you can list and replay them without re-synthesizing. Runs fully offline after the model is cached on first run.
 
 ## Prerequisites
 
@@ -56,6 +56,11 @@ Flags:
 - `-s, --speed FLOAT`: initial playback speed multiplier (must be > 0). Default `1.0`. Adjustable live with the up/down arrows.
 - `-v, --voice ID`: Kokoro voice ID. Default `bf_emma`. See [Voices](#voices).
 - `-d, --download`: allow Hugging Face downloads for this run by unsetting `HF_HUB_OFFLINE`. Use this the first time you try a new voice; cached voices then work offline.
+- `-l, --list`: list saved clips and exit. See [Saved clips](#saved-clips).
+- `-p, --play [N]`: replay a saved clip instead of reading the clipboard.
+- `--force`: re-synthesize even when a matching clip is already saved.
+- `--no-save`: play from a temp file; leave `audios/` untouched.
+- `--keep N`: retain only the N most recently played clips. Default `50`.
 
 ### Playback controls
 
@@ -71,6 +76,28 @@ While playing **in a terminal**, these keys are live:
 Controls require a focused terminal. When launched without a TTY (e.g. from a global shortcut), the script just plays the audio through with no interactive controls.
 
 Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. The companion `~/speak_clipboard.sh` wrapper forwards all flags through to the Python script.
+
+## Saved clips
+
+Every run saves its audio to `audios/` (gitignored) as `<timestamp>_<voice>_<hash>.wav`, alongside an `audios/index.json` catalog. List and replay them:
+
+```sh
+python speak_clipboard.py -l          # list saved clips
+python speak_clipboard.py -p          # pick one interactively
+python speak_clipboard.py -p 3        # replay clip 3 straight away
+python speak_clipboard.py -p 3 -s 1.2 # replay clip 3 at 1.2x
+```
+
+```
+  1. 2026-07-16T11-05-51  bf_emma       A third clip to trigger pruning.
+  2. 2026-07-16T11-05-23  bf_emma       Testing the audio library and replay...
+```
+
+Numbering is by recency of play, so `1` is always the clip you last listened to. Replaying skips synthesis and the torch import entirely, so `-l` and `-p` are near-instant.
+
+**Reuse.** The `<hash>` is derived from the text and voice together, so running on unchanged clipboard text just replays the saved clip instead of re-synthesizing. Pass `--force` to re-render (it replaces the file in place), or `--no-save` for a throwaway run that leaves `audios/` alone.
+
+**Retention.** WAV at 24kHz mono runs about 2.8 MB per minute of speech, so the 50 most recently played clips are kept and older ones are pruned after each synthesis. Change the bound with `--keep N`, or `--keep 0` to keep everything. Deleting files from `audios/` by hand is safe — missing files drop out of the listing automatically.
 
 ## Voices
 
@@ -95,15 +122,19 @@ The first time you use a voice that isn't cached, run with `-d` to fetch it. If 
 Most knobs are CLI flags now (see [Usage](#usage)). To change defaults or chunking behaviour, edit `speak_clipboard.py`:
 
 - `DEFAULT_VOICE`: voice used when `--voice` isn't passed.
-- `split_pattern=r"\n+"` in `stream_audio()`: how the input is chunked for streaming synthesis.
+- `DEFAULT_KEEP`: how many clips `audios/` retains without an explicit `--keep`.
+- `AUDIO_DIR`: where clips are stored.
+- `split_pattern=r"\n+"` in `synthesize()`: how the input is chunked for synthesis.
 
 ## How it works
 
 1. `pbpaste` reads the clipboard.
-2. `KPipeline` synthesizes the full text to a float32 PCM buffer (`24kHz`, mono) at 1.0x.
-3. The buffer is written to a temp WAV and played by `mpv`, launched with `--input-ipc-server` so the script can send commands over a Unix socket.
-4. Keypresses in the terminal are translated to mpv IPC commands (`set pause`, `seek`, `set_property speed`). Playback speed is applied by mpv with pitch correction, so it can change live without re-rendering.
-5. The temp WAV and socket are cleaned up when playback ends or you quit.
+2. The text and voice are hashed. On a hit in `audios/index.json`, synthesis is skipped and the saved WAV is played (step 5).
+3. Otherwise `KPipeline` synthesizes the full text to a float32 PCM buffer (`24kHz`, mono) at 1.0x.
+4. The buffer is written to `audios/<timestamp>_<voice>_<hash>.wav` and recorded in the index; clips beyond `--keep` are pruned.
+5. `mpv` plays the WAV, launched with `--input-ipc-server` so the script can send commands over a Unix socket.
+6. Keypresses in the terminal are translated to mpv IPC commands (`set pause`, `seek`, `set_property speed`). Playback speed is applied by mpv with pitch correction, so it can change live without re-rendering.
+7. The socket is cleaned up when playback ends or you quit. The WAV stays for replay unless `--no-save` was passed.
 
 ## Refreshing the model
 
