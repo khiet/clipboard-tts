@@ -519,7 +519,7 @@ def speak(text, entries, args):
         print(
             f"\nError: voice '{args.voice}' is not cached and HF is offline.\n"
             f"Re-run with -d/--download to fetch it, e.g.:\n"
-            f"    ./speak_clipboard.sh -d -v {args.voice}\n"
+            f"    python speak_clipboard.py -d -v {args.voice}\n"
             f"\nUnderlying error: {exc}",
             file=sys.stderr,
         )

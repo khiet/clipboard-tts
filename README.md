@@ -75,7 +75,20 @@ While playing **in a terminal**, these keys are live:
 
 Controls require a focused terminal. When launched without a TTY (e.g. from a global shortcut), the script just plays the audio through with no interactive controls.
 
-Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. The companion `~/speak_clipboard.sh` wrapper forwards all flags through to the Python script.
+Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. See [Raycast setup](#raycast-setup).
+
+## Raycast setup
+
+Two script commands live in `~/.raycast-scripts/`:
+
+- `speak-clipboard.sh` — reads the clipboard aloud. Forwards any flags through, so you can copy it per-voice (`-v af_bella`) or add `--no-save` to keep shortcut runs out of `audios/`.
+- `stop-speaking.sh` — cuts playback short.
+
+Register them once: **Raycast → Settings → Extensions → Script Commands → Add Directories**, then pick `~/.raycast-scripts`. The two commands appear in Raycast search as "Speak Clipboard" and "Stop Speaking"; assign hotkeys from the same settings pane (⌘K on a selected command → Configure Hotkey).
+
+Raycast runs scripts with a bare environment — mise never activates and Homebrew isn't on `PATH` — so the wrapper hard-codes the venv interpreter, `PATH=/opt/homebrew/bin:...` (for `mpv` and `espeak-ng`), and `HF_HUB_OFFLINE=1`. If you move the repo, update `REPO` at the top of `speak-clipboard.sh`.
+
+A Raycast launch has no TTY, so the transport keys are dead and there is no way to pause or stop from the keyboard — that's what "Stop Speaking" is for. It matches on mpv's IPC socket name, so it won't touch unrelated mpv windows.
 
 ## Saved clips
 
@@ -141,7 +154,7 @@ Most knobs are CLI flags now (see [Usage](#usage)). To change defaults or chunki
 To pick up an upstream model update, just run with `-d` once:
 
 ```sh
-./speak_clipboard.sh -d
+python speak_clipboard.py -d
 ```
 
 Or set the env var manually:
