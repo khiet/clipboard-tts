@@ -75,20 +75,7 @@ While playing **in a terminal**, these keys are live:
 
 Controls require a focused terminal. When launched without a TTY (e.g. from a global shortcut), the script just plays the audio through with no interactive controls.
 
-Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. See [Raycast setup](#raycast-setup).
-
-## Raycast setup
-
-Two script commands live in `~/.raycast-scripts/`:
-
-- `speak-clipboard.sh` — reads the clipboard aloud. Forwards any flags through, so you can copy it per-voice (`-v af_bella`) or add `--no-save` to keep shortcut runs out of `audios/`.
-- `stop-speaking.sh` — cuts playback short.
-
-Register them once: **Raycast → Settings → Extensions → Script Commands → Add Directories**, then pick `~/.raycast-scripts`. The two commands appear in Raycast search as "Speak Clipboard" and "Stop Speaking"; assign hotkeys from the same settings pane (⌘K on a selected command → Configure Hotkey).
-
-Raycast runs scripts with a bare environment — mise never activates and Homebrew isn't on `PATH` — so the wrapper hard-codes the venv interpreter, `PATH=/opt/homebrew/bin:...` (for `mpv` and `espeak-ng`), and `HF_HUB_OFFLINE=1`. If you move the repo, update `REPO` at the top of `speak-clipboard.sh`.
-
-A Raycast launch has no TTY, so the transport keys are dead and there is no way to pause or stop from the keyboard — that's what "Stop Speaking" is for. It matches on mpv's IPC socket name, so it won't touch unrelated mpv windows.
+Pair it with a system shortcut (Raycast, Hammerspoon, Karabiner, Shortcuts.app, etc.) to make it one keypress away. Launchers generally run scripts with a bare environment — mise won't activate and Homebrew won't be on `PATH` — so invoke `.venv/bin/python` by absolute path, put `/opt/homebrew/bin` on `PATH` for `mpv` and `espeak-ng`, and set `HF_HUB_OFFLINE=1` yourself. Such a launch also has no TTY, so nothing can pause or stop playback from the keyboard; `--no-save` is worth adding if you'd rather shortcut runs stayed out of `audios/`.
 
 ## Saved clips
 
