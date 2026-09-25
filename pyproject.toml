@@ -1,0 +1,22 @@
+[project]
+name = "clipboard-tts"
+version = "0.1.0"
+description = "Speak the macOS clipboard out loud with Kokoro TTS and mpv"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "kokoro>=0.9.4",
+    "soundfile>=0.14.0",
+    # transformers 5.x pins huggingface_hub <2; allowing 2.x makes the resolver
+    # backtrack transformers to 2021-era releases whose sdists no longer build.
+    "huggingface_hub>=1.33.0,<2",
+    # misaki's English G2P loads this spaCy model and, if missing, pip-installs
+    # it from GitHub at runtime. Declaring it keeps runs offline and stops
+    # `uv sync` from pruning it as an undeclared package.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
+
+[tool.uv]
+# Single script, not an installable package: uv sync only installs dependencies.
+package = false
+# Guard against the same backtracking through any other route.
+constraint-dependencies = ["transformers>=5"]

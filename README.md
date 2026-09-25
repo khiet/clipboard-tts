@@ -15,7 +15,7 @@ brew install espeak-ng mpv
 - `espeak-ng`: phonemizer backend Kokoro uses for English text.
 - `mpv`: media player used for playback and transport controls; driven over its JSON IPC socket.
 
-Python toolchain via [mise](https://mise.jdx.dev/) (auto-creates a `.venv`):
+Python toolchain via [mise](https://mise.jdx.dev/), which installs Python and [uv](https://docs.astral.sh/uv/) and auto-activates `.venv`:
 
 ```sh
 mise install
@@ -24,10 +24,10 @@ mise install
 ## Install Python dependencies
 
 ```sh
-pip install -r requirements.txt
+uv sync
 ```
 
-`requirements.txt` pins the direct dependencies (`kokoro`, `soundfile`, `huggingface_hub`); `torch`, `numpy`, and the rest come in transitively. To update, run `pip install -U --upgrade-strategy eager -r requirements.txt` without the pins (or bump them), verify a clip plays, then record the new versions in `requirements.txt`.
+Direct dependencies (`kokoro`, `soundfile`, `huggingface_hub`, plus the spaCy `en_core_web_sm` model misaki needs for English) are declared in `pyproject.toml`; `uv.lock` pins the full tree, including `torch`, `numpy`, and `transformers`. To update, run `uv lock --upgrade && uv sync`, verify a clip plays, then commit the new `uv.lock`.
 
 ## First run
 
