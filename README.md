@@ -24,10 +24,10 @@ mise install
 ## Install Python dependencies
 
 ```sh
-pip install kokoro
+pip install -r requirements.txt
 ```
 
-That pulls in `torch`, `numpy`, `soundfile`, `huggingface_hub`, and their transitive dependencies.
+`requirements.txt` pins the direct dependencies (`kokoro`, `soundfile`, `huggingface_hub`); `torch`, `numpy`, and the rest come in transitively. To update, run `pip install -U --upgrade-strategy eager -r requirements.txt` without the pins (or bump them), verify a clip plays, then record the new versions in `requirements.txt`.
 
 ## First run
 

@@ -1,0 +1,5 @@
+# Direct dependencies of speak_clipboard.py, pinned to the versions last verified.
+# kokoro pulls in torch, numpy, transformers, spacy and the rest transitively.
+kokoro==0.9.4
+soundfile==0.14.0
+huggingface_hub==1.33.0

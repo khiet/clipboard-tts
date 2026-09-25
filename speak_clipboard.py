@@ -242,6 +242,10 @@ def synthesize(text, voice):
         warnings.filterwarnings(
             "ignore", category=FutureWarning, module=r"torch\.nn\.utils\.weight_norm"
         )
+        # kokoro still scripts its model; torch >= 2.14 nags about torch.jit.
+        warnings.filterwarnings(
+            "ignore", category=FutureWarning, module=r"torch\.jit\._script"
+        )
         from kokoro import KPipeline
 
         import numpy as np
