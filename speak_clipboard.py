@@ -1,4 +1,9 @@
-"""Speak the macOS clipboard out loud using the Kokoro TTS model.
+"""Speak the macOS clipboard, or a file, out loud using the Kokoro TTS model.
+
+A file argument replaces the clipboard as the source. ``.md`` and ``.html``
+files are reduced to the text a reader would see: code blocks are skipped,
+table rows are read as comma-separated sentences, and markup is dropped.
+Any other file is read as-is.
 
 Audio is synthesized in full, saved under ``audios/``, then played through
 ``mpv`` driven over its JSON IPC socket. That gives interactive playback
@@ -10,14 +15,15 @@ controls when run in a terminal:
     [q]      quit
 
 Saved clips are content-addressed on (text, voice), so re-running on unchanged
-clipboard text replays the existing file instead of re-synthesizing.
+text replays the existing file instead of re-synthesizing.
 
 Usage:
-    python speak_clipboard.py [-s SPEED] [-v VOICE] [-d] [--force] [--no-save]
+    python speak_clipboard.py [FILE] [-s SPEED] [-v VOICE] [-d] [--force] [--no-save]
     python speak_clipboard.py -l
     python speak_clipboard.py -p [N]
 
 Options:
+    FILE                Speak this file instead of the clipboard.
     -s, --speed SPEED   Initial playback speed multiplier (must be > 0).
                         Default: 1.0. Adjustable live with up/down arrows.
                         Examples: 1.2 = 1.2x faster, 0.8 = 0.8x slower.
@@ -48,6 +54,7 @@ Examples:
     python speak_clipboard.py -v af_bella            # American female 'Bella'
     python speak_clipboard.py -v bm_george -s 1.1    # British male, 1.1x
     python speak_clipboard.py -v af_bella -d         # download new voice
+    python speak_clipboard.py notes.md               # speak a file
     python speak_clipboard.py -l                     # list saved clips
     python speak_clipboard.py -p                     # pick a clip to replay
     python speak_clipboard.py -p 3 -s 1.2            # replay clip 3 at 1.2x
@@ -57,8 +64,8 @@ Interactive controls need a focused terminal. When launched without a TTY
 
 Exit codes:
     0  success
-    1  clipboard empty, invalid args, missing voice (offline), no audio,
-       or no/invalid clip selected for --play
+    1  clipboard or file empty/unreadable, invalid args, missing voice
+       (offline), no audio, or no/invalid clip selected for --play
 """
 
 import argparse
@@ -67,6 +74,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import select
 import socket
 import subprocess
@@ -76,6 +84,7 @@ import termios
 import time
 import tty
 import warnings
+from html.parser import HTMLParser
 from pathlib import Path
 
 import soundfile as sf
@@ -211,6 +220,122 @@ def get_clipboard_text():
         check=True,
     )
     return result.stdout.strip()
+
+
+# Markdown inline syntax, applied in order. Images before links so the alt
+# text survives; underscore emphasis only at word edges so snake_case is kept.
+MD_INLINE = [
+    (re.compile(r"!\[([^\]]*)\]\([^)]*\)"), r"\1"),
+    (re.compile(r"\[([^\]]+)\]\([^)]*\)"), r"\1"),
+    (re.compile(r"\[([^\]]+)\]\[[^\]]*\]"), r"\1"),
+    (re.compile(r"<(?:https?://|mailto:)[^>]+>"), ""),
+    (re.compile(r"`+([^`]+)`+"), r"\1"),
+    (re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"), r"\2"),
+    (re.compile(r"\*(?=\S)(.+?)(?<=\S)\*"), r"\1"),
+    (re.compile(r"\b_(?=\S)(.+?)(?<=\S)_\b"), r"\1"),
+    (re.compile(r"~~(.+?)~~"), r"\1"),
+]
+MD_FENCE = re.compile(r"^\s*(```|~~~)")
+MD_RULE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
+MD_TABLE_DIVIDER = re.compile(r"^\s*\|?[\s:|-]+\|?\s*$")
+MD_LINK_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*\S+")
+MD_LINE_PREFIX = re.compile(
+    r"^\s*(?:>\s?)*(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)?"
+)
+
+
+def markdown_to_speech(text):
+    """Markdown as it reads when rendered: code blocks skipped, table rows as
+    comma-separated sentences, formatting marks and link URLs dropped.
+
+    Line structure is kept because synthesize() chunks on newlines.
+    """
+    lines = []
+    in_fence = None
+    for line in text.splitlines():
+        fence = MD_FENCE.match(line)
+        if in_fence:
+            if fence and fence.group(1) == in_fence:
+                in_fence = None
+            continue
+        if fence:
+            in_fence = fence.group(1)
+            continue
+        if MD_RULE.match(line) or MD_LINK_DEF.match(line):
+            continue
+        if line.lstrip().startswith("|"):
+            if MD_TABLE_DIVIDER.match(line):
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            line = ", ".join(c for c in cells if c) + "."
+        line = MD_LINE_PREFIX.sub("", line, count=1)
+        for pattern, repl in MD_INLINE:
+            line = pattern.sub(repl, line)
+        lines.append(line.strip())
+    return "\n".join(lines).strip()
+
+
+class _HTMLText(HTMLParser):
+    """Collects visible text, skipping code and non-rendered elements."""
+
+    SKIP = {"head", "script", "style", "noscript", "template", "svg", "pre"}
+    BLOCK = {
+        "address", "article", "aside", "blockquote", "br", "dd", "div", "dl",
+        "dt", "figcaption", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+        "header", "hr", "li", "main", "nav", "ol", "p", "section", "summary",
+        "table", "tr", "ul",
+    }  # fmt: skip
+
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.skip_depth = 0
+        self.row_cells = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self.skip_depth += 1
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+        if tag == "tr":
+            self.row_cells = 0
+        elif tag in ("td", "th") and self.row_cells is not None:
+            if self.row_cells:
+                self.parts.append(", ")
+            self.row_cells += 1
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self.skip_depth = max(0, self.skip_depth - 1)
+        elif tag == "tr":
+            self.parts.append(".\n")
+            self.row_cells = None
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.skip_depth:
+            self.parts.append(data)
+
+
+def html_to_speech(text):
+    """Visible HTML text with tables read like markdown_to_speech() reads them."""
+    parser = _HTMLText()
+    parser.feed(text)
+    parser.close()
+    lines = (" ".join(line.split()) for line in "".join(parser.parts).splitlines())
+    return "\n".join(line for line in lines if line)
+
+
+def get_file_text(path):
+    """Speakable text of a file, cleaned by extension (.md, .html)."""
+    raw = Path(path).read_text(encoding="utf-8", errors="replace")
+    suffix = Path(path).suffix.lower()
+    if suffix in (".md", ".markdown"):
+        return markdown_to_speech(raw)
+    if suffix in (".html", ".htm"):
+        return html_to_speech(raw)
+    return raw.strip()
 
 
 def lang_code_for_voice(voice):
@@ -391,9 +516,15 @@ def play_with_controls(wav_path, initial_speed):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Speak clipboard text via Kokoro TTS.",
+        description="Speak clipboard text, or a file, via Kokoro TTS.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="See module docstring for the voice ID format and the full voice list URL.",
+    )
+    parser.add_argument(
+        "file",
+        nargs="?",
+        help="Speak this file instead of the clipboard. .md and .html are "
+        "converted to their readable text; anything else is read as-is.",
     )
     parser.add_argument(
         "-s",
@@ -472,11 +603,20 @@ def main():
     if args.download:
         os.environ.pop("HF_HUB_OFFLINE", None)
 
-    text = get_clipboard_text()
-
-    if not text:
-        print("Clipboard is empty", file=sys.stderr)
-        sys.exit(1)
+    if args.file:
+        try:
+            text = get_file_text(args.file)
+        except OSError as exc:
+            print(f"Can't read {args.file}: {exc.strerror}", file=sys.stderr)
+            sys.exit(1)
+        if not text:
+            print(f"No speakable text in {args.file}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        text = get_clipboard_text()
+        if not text:
+            print("Clipboard is empty", file=sys.stderr)
+            sys.exit(1)
 
     speak(text, entries, args)
 
@@ -507,7 +647,7 @@ def replay(entries, number, speed):
 
 
 def speak(text, entries, args):
-    """Synthesize (or reuse) a clip for the clipboard text and play it."""
+    """Synthesize (or reuse) a clip for the text and play it."""
     digest = digest_for(text, args.voice)
     cached = next((e for e in entries if e["digest"] == digest), None)
 

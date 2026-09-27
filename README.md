@@ -1,6 +1,6 @@
 # Clipboard TTS
 
-Speak the macOS clipboard out loud using the [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Renders the text to audio, then plays it through `mpv` driven over its JSON IPC socket — giving you interactive pause, seek, and live speed controls when run in a terminal.
+Speak the macOS clipboard, or a file, out loud using the [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Renders the text to audio, then plays it through `mpv` driven over its JSON IPC socket — giving you interactive pause, seek, and live speed controls when run in a terminal.
 
 Clips are saved under `audios/` so you can list and replay them without re-synthesizing. Runs fully offline after the model is cached on first run.
 
@@ -51,8 +51,18 @@ python speak_clipboard.py -v bm_george -s 1.1  # British male, 1.1x
 python speak_clipboard.py -d -v jf_alpha       # download & try a new voice
 ```
 
-Flags:
+Or pass a file to speak it instead of the clipboard:
 
+```sh
+python speak_clipboard.py ~/Desktop/notes.md
+python speak_clipboard.py page.html -s 1.2
+```
+
+`.md` and `.html` files are reduced to the text a reader would see: code blocks (and `<pre>`) are skipped, table rows are read as comma-separated sentences (`| A | high |` becomes "A, high."), link URLs and formatting marks are dropped, and HTML `<head>`, `<script>`, and `<style>` are ignored. Any other file, like `.txt`, is read as-is. Clipboard text is never altered.
+
+Arguments and flags:
+
+- `FILE` (optional): speak this file instead of the clipboard.
 - `-s, --speed FLOAT`: initial playback speed multiplier (must be > 0). Default `1.0`. Adjustable live with the up/down arrows.
 - `-v, --voice ID`: Kokoro voice ID. Default `bf_emma`. See [Voices](#voices).
 - `-d, --download`: allow Hugging Face downloads for this run by unsetting `HF_HUB_OFFLINE`. Use this the first time you try a new voice; cached voices then work offline.
@@ -128,7 +138,7 @@ Most knobs are CLI flags now (see [Usage](#usage)). To change defaults or chunki
 
 ## How it works
 
-1. `pbpaste` reads the clipboard.
+1. `pbpaste` reads the clipboard, or the `FILE` argument is read and cleaned by extension.
 2. The text and voice are hashed. On a hit in `audios/index.json`, synthesis is skipped and the saved WAV is played (step 5).
 3. Otherwise `KPipeline` synthesizes the full text to a float32 PCM buffer (`24kHz`, mono) at 1.0x.
 4. The buffer is written to `audios/<timestamp>_<voice>_<hash>.wav` and recorded in the index; clips beyond `--keep` are pruned.
