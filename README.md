@@ -49,6 +49,7 @@ python speak_clipboard.py --speed 1.2          # 1.2x playback speed
 python speak_clipboard.py -v af_bella          # American female 'Bella'
 python speak_clipboard.py -v bm_george -s 1.1  # British male, 1.1x
 python speak_clipboard.py -d -v jf_alpha       # download & try a new voice
+python speak_clipboard.py --paused             # wait for space to start
 ```
 
 Or pass a file to speak it instead of the clipboard:
@@ -68,6 +69,7 @@ Arguments and flags:
 - `-d, --download`: allow Hugging Face downloads for this run by unsetting `HF_HUB_OFFLINE`. Use this the first time you try a new voice; cached voices then work offline.
 - `-l, --list`: list saved clips and exit. See [Saved clips](#saved-clips).
 - `-p, --play [N]`: replay a saved clip instead of reading the clipboard.
+- `--paused`: load the audio paused so it waits for `space` instead of auto-playing. Works with `-p` too. Ignored without a TTY.
 - `--force`: re-synthesize even when a matching clip is already saved.
 - `--no-save`: play from a temp file; leave `audios/` untouched.
 - `--keep N`: retain only the N most recently played clips. Default `50`.

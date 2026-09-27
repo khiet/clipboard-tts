@@ -18,9 +18,9 @@ Saved clips are content-addressed on (text, voice), so re-running on unchanged
 text replays the existing file instead of re-synthesizing.
 
 Usage:
-    python speak_clipboard.py [FILE] [-s SPEED] [-v VOICE] [-d] [--force] [--no-save]
+    python speak_clipboard.py [FILE] [-s SPEED] [-v VOICE] [-d] [--paused] [--force] [--no-save]
     python speak_clipboard.py -l
-    python speak_clipboard.py -p [N]
+    python speak_clipboard.py -p [N] [--paused]
 
 Options:
     FILE                Speak this file instead of the clipboard.
@@ -42,6 +42,8 @@ Options:
     -l, --list          List saved clips, most recently played first, and exit.
     -p, --play [N]      Replay saved clip N (as numbered by --list) instead of
                         reading the clipboard. With no N, pick interactively.
+        --paused        Load the audio paused; press space to start. Ignored
+                        without a TTY, since nothing could resume it.
         --force         Re-synthesize even if a matching clip is saved.
         --no-save       Play from a temp file; don't add to audios/.
         --keep N        Retain only the N most recently played clips, pruning
@@ -58,6 +60,7 @@ Examples:
     python speak_clipboard.py -l                     # list saved clips
     python speak_clipboard.py -p                     # pick a clip to replay
     python speak_clipboard.py -p 3 -s 1.2            # replay clip 3 at 1.2x
+    python speak_clipboard.py --paused               # wait for space to start
 
 Interactive controls need a focused terminal. When launched without a TTY
 (e.g. from a global shortcut), the script just plays the audio through.
@@ -433,7 +436,7 @@ def _render(paused, speed):
     print(f"\r{state}   speed {speed:.1f}x   ", end="", flush=True)
 
 
-def _control_loop(sock, proc, speed):
+def _control_loop(sock, proc, speed, paused):
     """Translate keypresses to mpv IPC commands until playback ends or quits."""
     if not sys.stdin.isatty():
         proc.wait()
@@ -441,7 +444,6 @@ def _control_loop(sock, proc, speed):
 
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
-    paused = False
     print(
         "Controls:  [space] pause/resume   [←/→] seek 5s   [↑/↓] speed ±0.1   [q] quit"
     )
@@ -479,8 +481,13 @@ def _control_loop(sock, proc, speed):
         print()
 
 
-def play_with_controls(wav_path, initial_speed):
-    """Play a WAV file through mpv with interactive transport controls."""
+def play_with_controls(wav_path, initial_speed, start_paused=False):
+    """Play a WAV file through mpv with interactive transport controls.
+
+    start_paused only takes effect with a TTY; otherwise playback would sit
+    paused with no way to resume it.
+    """
+    start_paused = start_paused and sys.stdin.isatty()
     sock_path = os.path.join(tempfile.gettempdir(), f"mpv-clipboard-{os.getpid()}.sock")
     proc = None
     try:
@@ -492,6 +499,7 @@ def play_with_controls(wav_path, initial_speed):
                 "--no-config",
                 "--audio-pitch-correction=yes",
                 f"--speed={initial_speed}",
+                f"--pause={'yes' if start_paused else 'no'}",
                 f"--input-ipc-server={sock_path}",
                 str(wav_path),
             ]
@@ -501,7 +509,7 @@ def play_with_controls(wav_path, initial_speed):
             proc.wait()
             return
         try:
-            _control_loop(sock, proc, initial_speed)
+            _control_loop(sock, proc, initial_speed, start_paused)
         finally:
             sock.close()
         proc.wait()
@@ -562,6 +570,11 @@ def main():
         help="Replay saved clip N instead of the clipboard. No N: pick interactively.",
     )
     parser.add_argument(
+        "--paused",
+        action="store_true",
+        help="Load the audio paused; press space to start. Ignored without a TTY.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Re-synthesize even if a clip for this text and voice is saved.",
@@ -591,7 +604,7 @@ def main():
         return
 
     if args.play is not None:
-        replay(entries, args.play, args.speed)
+        replay(entries, args.play, args.speed, args.paused)
         return
 
     try:
@@ -621,7 +634,7 @@ def main():
     speak(text, entries, args)
 
 
-def replay(entries, number, speed):
+def replay(entries, number, speed, paused):
     """Play a saved clip by --list number, or interactively when number is 0."""
     if number:
         entry = entry_at(entries, number)
@@ -643,7 +656,7 @@ def replay(entries, number, speed):
             sys.exit(1)
 
     save_index(touch(entries, entry))
-    play_with_controls(AUDIO_DIR / entry["file"], speed)
+    play_with_controls(AUDIO_DIR / entry["file"], speed, paused)
 
 
 def speak(text, entries, args):
@@ -654,7 +667,7 @@ def speak(text, entries, args):
     if cached is not None and not args.force and not args.no_save:
         print(f"Reusing saved clip {cached['file']} (--force to re-synthesize)")
         save_index(touch(entries, cached))
-        play_with_controls(AUDIO_DIR / cached["file"], args.speed)
+        play_with_controls(AUDIO_DIR / cached["file"], args.speed, args.paused)
         return
 
     try:
@@ -674,7 +687,7 @@ def speak(text, entries, args):
         os.close(fd)
         try:
             sf.write(wav_path, audio, SAMPLE_RATE)
-            play_with_controls(wav_path, args.speed)
+            play_with_controls(wav_path, args.speed, args.paused)
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(wav_path)
@@ -688,7 +701,7 @@ def speak(text, entries, args):
 
     path, updated = store_audio(audio, text, args.voice, digest, remaining)
     save_index(prune(updated, args.keep))
-    play_with_controls(path, args.speed)
+    play_with_controls(path, args.speed, args.paused)
 
 
 if __name__ == "__main__":
