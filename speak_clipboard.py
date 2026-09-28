@@ -46,6 +46,8 @@ Options:
                         without a TTY, since nothing could resume it.
         --force         Re-synthesize even if a matching clip is saved.
         --no-save       Play from a temp file; don't add to audios/.
+    -o, --out PATH      Write the WAV to PATH and exit. Nothing is played or
+                        added to audios/; a saved clip is reused unless --force.
         --keep N        Retain only the N most recently played clips, pruning
                         least-recently-played first. 0 keeps everything.
                         Default: 50.
@@ -57,6 +59,7 @@ Examples:
     python speak_clipboard.py -v bm_george -s 1.1    # British male, 1.1x
     python speak_clipboard.py -v af_bella -d         # download new voice
     python speak_clipboard.py notes.md               # speak a file
+    python speak_clipboard.py page.html -o page.wav  # write audio, don't play
     python speak_clipboard.py -l                     # list saved clips
     python speak_clipboard.py -p                     # pick a clip to replay
     python speak_clipboard.py -p 3 -s 1.2            # replay clip 3 at 1.2x
@@ -79,6 +82,7 @@ import json
 import os
 import re
 import select
+import shutil
 import socket
 import subprocess
 import sys
@@ -585,6 +589,12 @@ def main():
         help="Play from a temp file; don't add to audios/.",
     )
     parser.add_argument(
+        "-o",
+        "--out",
+        metavar="PATH",
+        help="Write the WAV to PATH and exit without playing or adding to audios/.",
+    )
+    parser.add_argument(
         "--keep",
         type=int,
         default=DEFAULT_KEEP,
@@ -660,9 +670,14 @@ def replay(entries, number, speed, paused):
 
 
 def speak(text, entries, args):
-    """Synthesize (or reuse) a clip for the text and play it."""
+    """Synthesize (or reuse) a clip for the text and play it, or write it to --out."""
     digest = digest_for(text, args.voice)
     cached = next((e for e in entries if e["digest"] == digest), None)
+
+    if args.out and cached is not None and not args.force:
+        shutil.copyfile(AUDIO_DIR / cached["file"], args.out)
+        print(args.out)
+        return
 
     if cached is not None and not args.force and not args.no_save:
         print(f"Reusing saved clip {cached['file']} (--force to re-synthesize)")
@@ -681,6 +696,11 @@ def speak(text, entries, args):
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if args.out:
+        sf.write(args.out, audio, SAMPLE_RATE)
+        print(args.out)
+        return
 
     if args.no_save:
         fd, wav_path = tempfile.mkstemp(suffix=".wav")
